@@ -28,11 +28,15 @@ data Automaton input output = Pure (input -> output)
 
 -- The basics
 
--- AFRP name: arr
+{-| Lift a normal function to the status of Automaton (which sounds far more awesome)
+AFRP name: `arr`
+-}
 pure: (i -> o) -> Automaton i o
 pure = Pure
 
--- AFRP name: >>>
+{-| Connect two automatons. The first one gives it's output to the second one.
+AFRP name: >>>
+-}
 andThen: Automaton i inter -> Automaton inter o -> Automaton i o
 andThen first second =
   case first of
@@ -48,13 +52,19 @@ andThen first second =
                             (o, sst')     = s inter sst    -- fst and sst are the state of first and second
                         in (o, (fst', sst')))              -- ect...
 
--- AFRP name: first
+{-| Add an extra input "channel" to be ignored and just sent on as output.
+Mostly useful as a building block to construct usuable stuff...
+AFRP name: first
+-}
 extendDown: Automaton i o -> Automaton (i,extra) (o,extra)
 extendDown auto = case auto of
   Pure fun          -> Pure (\(i,extra) -> (fun i, extra))
   Stateful base fun -> Stateful base (\(i,extra) s -> (fun i s, extra))
 
--- AFRP name: loop
+{-| Connects the second output as input to itself, creating a loop. Now your automaton is stateful! :D
+Does require a default value to put on the loop.
+AFRP name: loop
+-}
 loop: s -> Automaton (i,s) (o,s) -> Automaton i o
 loop base auto = case auto of
   Pure fun           -> Stateful base (curry fun)
@@ -64,7 +74,9 @@ loop base auto = case auto of
       in (o, (s', s2'))) -- newFun: i -> (s, s2) -> (o, (s, s2))
     in Stateful (base, base2) newFun
 
--- Run an automaton on a given signal
+{-| Runs the automaton on a given signal, like a lifted function.
+Takes a default value for the output.
+-}
 run: Automaton i o -> o ->  Signal i -> Signal o
 run auto baseOut input = case auto of
   Pure fun          -> lift fun input
@@ -75,46 +87,62 @@ run auto baseOut input = case auto of
 
 -- Other frequently used functions/operators
 
--- Create an automaton with state. Requires an initial state and a step
--- function to step the state forward. For example, an automaton that counted
--- how many steps it has taken would look like this:
---
---         count = Automaton a Int
---         count = state 0 (\\_ c -> c+1)
---
--- It is a stateful automaton. The initial state is zero, and the step function
--- increments the state on every step.
+{-| Easy shortcut for creating an automaton with state. Requires an
+initial state and a step function to step the state forward. For
+example, an automaton that counts how many steps it has taken would
+look like this:
+
+        count = Automaton a Int
+        count = state 0 (\_ c -> c+1)
+
+-}
 state : s -> (i -> s -> s) -> Automaton i s
 state base fun = loop base (pure (\(i,s) ->
                                     let s' = fun i s
                                     in (s',s')))
 
--- Create an automaton with hidden state. Requires an initial state and a
--- step function to step the state forward and produce an output.
+{-| Create an automaton with hidden state. Requires an initial state
+and a step function to step the state forward and produce an output.
+-}
 hiddenState : s -> (i -> s -> (s,o)) -> Automaton i o
 hiddenState base fun = loop base (pure (\(i,s) ->
                                           let (o,s') = fun i s
                                           in (s',o)))
 
--- AFRP name: second
+{-| Like extendDown this function add an extra input that is ignored
+and sent out again, only this extra input it added before the existing
+input in stead of after.
+AFRP name: second
+-}
 extendUp: Automaton i o -> Automaton (extra,i) (extra,o)
 extendUp auto =
   let swap (a, b) = (b, a)
   in pure swap `andThen` extendDown auto `andThen` pure swap
 
--- (parallel composition)
+{-| Parallel composition, stacking them up.
+AFRP name: ***
+-}
 pair: Automaton i1 o1 -> Automaton i2 o2 -> Automaton (i1,i2) (o1,o2)
 pair f g = extendDown f `andThen` extendUp g
 
+{-| Combine two Automatons that work on the same kind of input.
+AFRP name: &&&
+-}
 branch : Automaton i o1 -> Automaton i o2 -> Automaton i (o1,o2)
 branch f g =
   let double = pure (\i -> (i,i))
   in double `andThen` pair f g
 
+{-| Kind of like a list cons (::), adds an automaton to an automaton
+that is already branched.
+A building block for `combine`.
+-}
 combi: Automaton i o -> Automaton i [o] -> Automaton i [o]
 combi a1 a2 = (a1 `branch` a2) `andThen` pure (uncurry (::))
 
--- Combine a list of automatons into a single automaton that produces a list.
+{-| Combine a list of automatons into a single automaton that produces
+a list.
+-}
 combine : [Automaton i o] -> Automaton i [o]
 combine autos =
   let l = length autos
@@ -125,7 +153,7 @@ combine autos =
 
 -- Examples of automata
 
--- Count the number of steps taken.
+{-| Counts the number of steps taken. -}
 count : Automaton a Int
 count = state 0 (\_ c -> c + 1)
 
@@ -137,7 +165,9 @@ dequeue q = case q of
               (en,[]) -> dequeue ([], reverse en)
               (en,hd::tl) -> Just (hd, (en,tl))
 
--- Computes the running average of the last `n` inputs.
+{-| Computes the running average of the last n inputs.
+@arg1 n
+-}
 average : Int -> Automaton Float Float
 average k =
   let step n (ns,len,sum) =
